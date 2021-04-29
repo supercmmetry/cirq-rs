@@ -1,5 +1,5 @@
 [package]
-name = "cirq_core"
+name = "cirq"
 version = "0.1.0"
 authors = ["supercmmetry <vishaals2000@gmail.com>"]
 edition = "2018"
@@ -7,5 +7,5 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.40"
-dyn-clonable = "0.9.0"
+cirq_core = { path = "cirq_core" }
+cirq_google = { path = "cirq_google" }

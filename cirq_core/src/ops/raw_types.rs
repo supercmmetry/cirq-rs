@@ -1,12 +1,13 @@
 use std::cmp::Ordering;
-use std::hash::Hash;
 
 use anyhow::Error;
+use dyn_clonable::dyn_clone;
+use dyn_clonable::dyn_clone::DynClone;
 
 use crate::utils::extra_traits::Hashable;
 
 /// Identifies a quantum object such as a qubit, qudit, resonator, etc.
-pub trait QId {
+pub trait QId: DynClone {
     fn comparison_key(&self) -> String;
     /**
      * Returns the dimension or the number of quantum levels this qid has.
@@ -18,34 +19,36 @@ pub trait QId {
     fn validate_dimension(&self, dimension: u64) -> Result<(), anyhow::Error>;
 }
 
+dyn_clone::clone_trait_object!(QId);
+
 #[derive(Clone)]
-struct QubitAsQId<'a> {
+struct QubitAsQId {
     comparison_key: String,
-    pub qubit: &'a dyn QId,
+    pub qubit: Box<dyn QId>,
     pub dimension: u64,
 }
 
-impl PartialEq for QubitAsQId<'_> {
+impl PartialEq for QubitAsQId {
     fn eq(&self, other: &Self) -> bool {
         self.comparison_key == other.comparison_key
     }
 }
 
-impl Eq for QubitAsQId<'_> {}
+impl Eq for QubitAsQId {}
 
-impl PartialOrd for QubitAsQId<'_> {
+impl PartialOrd for QubitAsQId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.comparison_key.partial_cmp(&other.comparison_key)
     }
 }
 
-impl Ord for QubitAsQId<'_> {
+impl Ord for QubitAsQId {
     fn cmp(&self, other: &Self) -> Ordering {
         self.comparison_key.cmp(&other.comparison_key)
     }
 }
 
-impl QId for QubitAsQId<'_> {
+impl QId for QubitAsQId {
     fn comparison_key(&self) -> String {
         self.comparison_key.clone()
     }
@@ -63,8 +66,8 @@ impl QId for QubitAsQId<'_> {
     }
 }
 
-impl<'a> QubitAsQId<'a> {
-    pub fn new<T: QId>(qubit: &'a T, dimension: u64) -> Result<Self, anyhow::Error> {
+impl QubitAsQId {
+    pub fn new(qubit: Box<dyn QId>, dimension: u64) -> Result<Self, anyhow::Error> {
         let q = Self {
             comparison_key: "".to_string(),
             qubit,
@@ -76,18 +79,21 @@ impl<'a> QubitAsQId<'a> {
     }
 
     /// Returns a new QubitAsQId with a different dimension.
-    fn with_dimension(&'a self, dimension: u64) -> Result<Self, anyhow::Error> {
+    fn with_dimension(&self, dimension: u64) -> Result<Self, anyhow::Error> {
         if self.dimension == dimension {
             Ok(self.clone())
         } else {
-            QubitAsQId::new(self, dimension)
+            QubitAsQId::new(Box::new(self.clone()), dimension)
         }
     }
 }
 
-pub trait QIdShape {
+pub trait QIdShape: DynClone {
     fn qid_shape(&self) -> Vec<u64>;
 }
+
+dyn_clone::clone_trait_object!(QIdShape);
+
 
 /**
  *   An operation type that can be applied to a collection of qubits.
@@ -102,7 +108,8 @@ pub trait QIdShape {
  *   Linear combinations of gates can be created by adding gates together and
  *   multiplying them by scalars.
 */
-pub trait Gate: QIdShape {
+
+pub trait Gate: QIdShape + DynClone {
     /**
      * Checks if this gate can be applied to the given qubits.
      * By default checks that:
@@ -126,11 +133,13 @@ pub trait Gate: QIdShape {
     }
 }
 
+dyn_clone::clone_trait_object!(Gate);
+
 /** An effect applied to a collection of qubits.
  * The most common kind of Operation is a GateOperation, which separates its
  * effect into a qubit-independent Gate and the qubits it should be applied to.
  */
-pub trait Operation: QIdShape {
+pub trait Operation: QIdShape + DynClone {
     fn gate(&self) -> Option<Box<dyn Gate>> {
         None
     }
@@ -167,17 +176,59 @@ pub trait Operation: QIdShape {
     *    new_tags: The tags to wrap this operation in.
     */
     fn with_tags(&self, new_tags: Vec<Box<dyn Hashable>>) -> TaggedOperation;
-
-
-
 }
 
-pub struct TaggedOperation {
+dyn_clone::clone_trait_object!(Operation);
 
+
+/// Operation annotated with a set of Tags.
+#[derive(Clone)]
+pub struct TaggedOperation {
+    pub sub_operation: Box<dyn Operation>,
+    tags: Vec<Box<dyn Hashable>>,
 }
 
 impl TaggedOperation {
-    pub fn new<T: Operation, H: Hashable>(sub_operation: T, new_tags: Vec<H>) -> Self {
-        Self {}
+    pub fn new(sub_operation: Box<dyn Operation>, new_tags: Vec<Box<dyn Hashable>>) -> Self {
+        Self {
+            sub_operation,
+            tags: new_tags,
+        }
+    }
+
+    pub fn qubits(&self) -> Vec<Box<dyn QId>> {
+        self.sub_operation.qubits()
+    }
+
+    pub fn gate(&self) -> Option<Box<dyn Gate>> {
+        self.sub_operation.gate()
+    }
+
+    pub fn with_qubits(&self, new_qubits: Vec<Box<dyn QId>>) -> Self {
+        Self::new(self.sub_operation.with_qubits(new_qubits), self.tags.clone())
+    }
+
+    pub fn tags(&self) -> Vec<Box<dyn Hashable>> {
+        self.tags.clone()
+    }
+}
+
+/// The inverse of a composite gate.
+#[derive(Clone)]
+struct InverseCompositeGate {
+    original: Box<dyn Gate>,
+}
+
+impl InverseCompositeGate {
+    pub fn new(original: Box<dyn Gate>) -> Self {
+        Self {
+            original
+        }
+    }
+}
+
+impl QIdShape for InverseCompositeGate {
+    fn qid_shape(&self) -> Vec<u64> {
+        self.original.qid_shape()
     }
 }
