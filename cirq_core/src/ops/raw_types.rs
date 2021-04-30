@@ -5,6 +5,8 @@ use dyn_clonable::dyn_clone;
 use dyn_clonable::dyn_clone::DynClone;
 
 use crate::utils::extra_traits::Hashable;
+use crate::ops::gate_operation::GateOperation;
+use std::ops::Deref;
 
 /// Identifies a quantum object such as a qubit, qudit, resonator, etc.
 pub trait QId: DynClone {
@@ -131,6 +133,10 @@ pub trait Gate: QIdShape + DynClone {
 
         Ok(())
     }
+
+    fn pow(&self, power: i64) -> Result<Box<dyn Gate>, anyhow::Error>;
+
+    fn on(&self, qubits: Vec<Box<dyn QId>>) -> Box<dyn Operation>;
 }
 
 dyn_clone::clone_trait_object!(Gate);
@@ -232,3 +238,20 @@ impl QIdShape for InverseCompositeGate {
         self.original.qid_shape()
     }
 }
+
+impl Gate for InverseCompositeGate {
+    fn pow(&self, power: i64) -> Result<Box<dyn Gate>, Error> {
+        if power == 1 {
+            Ok(Box::new(self.clone()))
+        } else if power == -1 {
+            Ok(self.original.clone())
+        } else {
+            Err(anyhow!("Not implemented"))
+        }
+    }
+
+    fn on(&self, qubits: Vec<Box<dyn QId>>) -> Box<dyn Operation> {
+        Box::new(GateOperation::new(Box::new(self.clone()), qubits))
+    }
+}
+
